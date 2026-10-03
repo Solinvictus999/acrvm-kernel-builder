@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_branch:
-        description: 'Kernel Branch (e.g., chromeos-5.10-arcvm)'
+        description: 'Kernel Branch (Must exist on ://googlesource.com)'
         required: true
         default: 'chromeos-5.10-arcvm'
       arch:
@@ -26,23 +26,30 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc libssl-dev libfl-dev bison flex git curl wget zstd
+          sudo apt-get install -y build-essential bc libssl-dev libfl-dev bison flex git curl wget zstd libelf-dev
 
       - name: Setup Clang toolchain
         run: |
+          # Fix 404: Target the complete, explicit Android toolchain repository pool
           git clone --depth=1 https://googlesource.com toolchain
-          echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_PATH
+          
+          # Dynamically locate the compiler executable path and export it to the runner PATH
+          CLANG_BIN=$(find toolchain -name "clang" -type f -permalink /111 -exec dirname {} \; | head -n 1)
+          echo "Found compiler path at: $PWD/$CLANG_BIN"
+          echo "$PWD/$CLANG_BIN" >> $GITHUB_PATH
 
       - name: Clone ChromeOS Kernel Source
         run: |
-          git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} https://github.com/WeiguangTWK/android_kernel_google_chromeos kernel-src
+          # Fix 404: Direct the script to the proper Chromium source endpoint instead of a generic domain
+          git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} https://://googlesource.com/chromiumos/third_party/kernel.git kernel-src
 
       - name: Integrate KernelSU
         working-directory: kernel-src
         run: |
+          # Download and execute the standard legacy setup script into the kernel source root
           curl -LSs "https://githubusercontent.com" | bash -s main
           
-          # Enable required config options
+          # Enable Kprobes and KernelSU compilation configurations inside the targeted defconfig
           CONFIG_FILE="arch/${{ github.event.inputs.arch }}/configs/${{ github.event.inputs.defconfig }}"
           echo -e "\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_KSU=y" >> $CONFIG_FILE
 
@@ -50,6 +57,7 @@ jobs:
         working-directory: kernel-src
         run: |
           mkdir -p out
+          # Generate config and compile the kernel using the integrated toolchain environment
           make O=out ARCH=${{ github.event.inputs.arch }} CC=clang ${{ github.event.inputs.defconfig }}
           make O=out ARCH=${{ github.event.inputs.arch }} CC=clang -j$(nproc)
 
