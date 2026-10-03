@@ -1,0 +1,37 @@
+name: Build ARCVM Kernel
+on:
+  workflow_dispatch: # Allows you to manually trigger the build with a button click
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install Build Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git bc bison flex libssl-dev make lld llvm clang libelf-dev libcap-dev
+
+    - name: Clone Google ARCVM Kernel Source
+      run: |
+        git clone https://googlesource.com -b common-android12-5.10-arcvm --depth=1
+        cd common
+
+    - name: Inject KernelSU
+      run: |
+        cd common
+        curl -LSs "https://githubusercontent.com" | bash -s main
+
+    - name: Compile Kernel
+      run: |
+        cd common
+        export ARCH=x86_64
+        export CROSS_COMPILE=x86_64-linux-gnu-
+        export CC=clang
+        make arcvm_defconfig
+        make -j$(nproc)
+
+    - name: Upload Finished Kernel File
+      uses: actions/upload-artifact@v4
+      with:
+        name: patched-arcvm-kernel
+        path: common/arch/x86_64/boot/bzImage
