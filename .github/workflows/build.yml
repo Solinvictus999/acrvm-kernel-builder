@@ -1,62 +1,37 @@
-name: Build ChromeOS ARCVM KernelSU
-
+name: Build ARCVM Kernel
 on:
-  workflow_dispatch:
-    inputs:
-      kernel_branch:
-        description: 'Kernel Branch (e.g., chromeos-5.10-arcvm)'
-        required: true
-        default: 'chromeos-5.10-arcvm'
-      arch:
-        description: 'Architecture (x86_64 or arm64)'
-        required: true
-        default: 'x86_64'
-      defconfig:
-        description: 'Defconfig name'
-        required: true
-        default: 'x86_64_arcvm_defconfig'
+  workflow_dispatch: # Allows you to manually trigger the build with a button click
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Install Build Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git bc bison flex libssl-dev make lld llvm clang libelf-dev libcap-dev
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bc libssl-dev libfl-dev bison flex git curl wget zstd
+    - name: Clone Google ARCVM Kernel Source
+      run: |
+        git clone https://googlesource.com -b common-android12-5.10-arcvm --depth=1
+        cd common
 
-      - name: Setup Clang toolchain
-        run: |
-          git clone --depth=1 https://googlesource.com toolchain
-          echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_PATH
+    - name: Inject KernelSU
+      run: |
+        cd common
+        curl -LSs "https://githubusercontent.com" | bash -s main
 
-      - name: Clone ChromeOS Kernel Source
-        run: |
-          git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} https://github.com/WeiguangTWK/android_kernel_google_chromeos kernel-src
+    - name: Compile Kernel
+      run: |
+        cd common
+        export ARCH=x86_64
+        export CROSS_COMPILE=x86_64-linux-gnu-
+        export CC=clang
+        make arcvm_defconfig
+        make -j$(nproc)
 
-      - name: Integrate KernelSU
-        working-directory: kernel-src
-        run: |
-          curl -LSs "https://githubusercontent.com" | bash -s main
-          
-          # Enable required config options
-          CONFIG_FILE="arch/${{ github.event.inputs.arch }}/configs/${{ github.event.inputs.defconfig }}"
-          echo -e "\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_KSU=y" >> $CONFIG_FILE
-
-      - name: Build Kernel
-        working-directory: kernel-src
-        run: |
-          mkdir -p out
-          make O=out ARCH=${{ github.event.inputs.arch }} CC=clang ${{ github.event.inputs.defconfig }}
-          make O=out ARCH=${{ github.event.inputs.arch }} CC=clang -j$(nproc)
-
-      - name: Upload Kernel Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arcvm-kernel-${{ github.event.inputs.arch }}
-          path: |
-            kernel-src/out/arch/${{ github.event.inputs.arch }}/boot/bzImage
-            kernel-src/out/arch/${{ github.event.inputs.arch }}/boot/Image
+    - name: Upload Finished Kernel File
+      uses: actions/upload-artifact@v4
+      with:
+        name: patched-arcvm-kernel
+        path: common/arch/x86_64/boot/bzImage
